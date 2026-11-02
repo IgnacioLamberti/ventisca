@@ -6,19 +6,18 @@
 (function (root) {
   'use strict';
 
-  const MAP = { w: 2400, h: 2400 };
+  const MAP = { w: 4200, h: 4200 };
   const PLAYER_R = 16;
   const SPEED = 230; // píxeles por segundo
   const PICKUP_R = 48;
 
-  // k = tipo visual del obstáculo: ice (muro de hielo), crate (caja), rock (roca), tree (pino)
-  const WALLS = [
-    // Bordes del mapa
-    { x: 0, y: 0, w: 2400, h: 40, k: 'ice' },
-    { x: 0, y: 2360, w: 2400, h: 40, k: 'ice' },
-    { x: 0, y: 0, w: 40, h: 2400, k: 'ice' },
-    { x: 2360, y: 0, w: 40, h: 2400, k: 'ice' },
+  // El diseño hecho a mano ocupa el centro del mapa (2400 × 2400); alrededor
+  // se genera una zona exterior con cabañas, bosques, rocas y cajas.
+  const CORE = 2400;
+  const OFFSET = (MAP.w - CORE) / 2;
 
+  // k = tipo visual del obstáculo: ice (muro de hielo), crate (caja), rock (roca), tree (pino), wood (pared de cabaña)
+  const CORE_WALLS = [
     // Fuerte central (cuatro esquinas con entradas en cada lado)
     { x: 1000, y: 1000, w: 160, h: 30, k: 'ice' },
     { x: 1000, y: 1000, w: 30, h: 160, k: 'ice' },
@@ -89,14 +88,13 @@
     { x: 1540, y: 360, w: 40, h: 40, k: 'tree' },
   ];
 
-  // Lugares donde aparecen objetos en el piso (y reaparecen al rato de ser tomados)
-  const ITEM_SPAWNS = [
+  const CORE_ITEMS = [
     // Dentro del fuerte: el botín más jugoso
     { x: 1300, y: 1100, type: 'sniper' },
     { x: 1300, y: 1300, type: 'rifle' },
     { x: 1100, y: 1100, type: 'armor' },
     { x: 1100, y: 1300, type: 'medkit' },
-    // Resto del mapa
+    // Resto del centro
     { x: 600, y: 600, type: 'rifle' },
     { x: 1800, y: 1800, type: 'rifle' },
     { x: 1800, y: 600, type: 'smg' },
@@ -115,6 +113,131 @@
     { x: 900, y: 900, type: 'armor' },
     { x: 1500, y: 1500, type: 'armor' },
   ];
+
+  const WALLS = [
+    // Bordes del mapa
+    { x: 0, y: 0, w: MAP.w, h: 40, k: 'ice' },
+    { x: 0, y: MAP.h - 40, w: MAP.w, h: 40, k: 'ice' },
+    { x: 0, y: 0, w: 40, h: MAP.h, k: 'ice' },
+    { x: MAP.w - 40, y: 0, w: 40, h: MAP.h, k: 'ice' },
+    ...CORE_WALLS.map((w) => ({ ...w, x: w.x + OFFSET, y: w.y + OFFSET })),
+  ];
+
+  // Lugares donde aparecen objetos en el piso (y reaparecen al rato de ser tomados)
+  const ITEM_SPAWNS = CORE_ITEMS.map((it) => ({ ...it, x: it.x + OFFSET, y: it.y + OFFSET }));
+
+  // ---------------------------------------------------------------- Zona exterior generada
+  // Se usa un generador pseudoaleatorio con semilla fija: servidor y cliente
+  // construyen exactamente el mismo mapa sin tener que enviarlo por la red.
+
+  function mulberry32(seed) {
+    return function () {
+      seed |= 0;
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const rand = mulberry32(20261102);
+  const between = (a, b) => a + rand() * (b - a);
+  const pick = (list) => list[Math.floor(rand() * list.length)];
+
+  // Una cabaña de madera de 220 × 170 con una puerta en un lado al azar
+  function cabin(x, y) {
+    const W = 220, H = 170, t = 22, door = 70;
+    const side = Math.floor(rand() * 4);
+    const parts = [];
+    const hWall = (yy, withDoor) => {
+      if (!withDoor) return parts.push({ x, y: yy, w: W, h: t });
+      const seg = (W - door) / 2;
+      parts.push({ x, y: yy, w: seg, h: t }, { x: x + W - seg, y: yy, w: seg, h: t });
+    };
+    const vWall = (xx, withDoor) => {
+      if (!withDoor) return parts.push({ x: xx, y, w: t, h: H });
+      const seg = (H - door) / 2;
+      parts.push({ x: xx, y, w: t, h: seg }, { x: xx, y: y + H - seg, w: t, h: seg });
+    };
+    hWall(y, side === 0);
+    hWall(y + H - t, side === 1);
+    vWall(x, side === 2);
+    vWall(x + W - t, side === 3);
+    return { w: W, h: H, parts: parts.map((p) => ({ ...p, k: 'wood' })), loot: { x: x + W / 2, y: y + H / 2 } };
+  }
+
+  function crates(x, y) {
+    const layouts = [
+      [[0, 0], [60, 0], [0, 60]],
+      [[0, 0], [60, 0]],
+      [[0, 0], [0, 60], [60, 60]],
+      [[0, 0], [60, 0], [120, 0]],
+    ];
+    const parts = pick(layouts).map(([dx, dy]) => ({ x: x + dx, y: y + dy, w: 60, h: 60, k: 'crate' }));
+    return { w: 180, h: 120, parts };
+  }
+
+  function grove(x, y) {
+    const parts = [];
+    const n = 3 + Math.floor(rand() * 3);
+    for (let i = 0; i < n; i++) {
+      parts.push({ x: x + Math.floor(rand() * 4) * 70, y: y + Math.floor(rand() * 3) * 80, w: 40, h: 40, k: 'tree' });
+    }
+    return { w: 250, h: 200, parts };
+  }
+
+  function rock(x, y) {
+    const w = Math.round(between(70, 120));
+    const h = Math.round(between(60, 100));
+    return { w, h, parts: [{ x, y, w, h, k: 'rock' }] };
+  }
+
+  function iceWall(x, y) {
+    const long = Math.round(between(220, 420));
+    const horizontal = rand() < 0.5;
+    const w = horizontal ? long : 30;
+    const h = horizontal ? 30 : long;
+    return { w, h, parts: [{ x, y, w, h, k: 'ice' }] };
+  }
+
+  const inCore = (x, y, w, h, pad) =>
+    x < OFFSET + CORE + pad && x + w > OFFSET - pad && y < OFFSET + CORE + pad && y + h > OFFSET - pad;
+
+  const overlapsWall = (x, y, w, h, pad) =>
+    WALLS.some((o) => x < o.x + o.w + pad && x + w + pad > o.x && y < o.y + o.h + pad && y + h + pad > o.y);
+
+  // Pide un lugar libre en la zona exterior y coloca la estructura ahí
+  function scatter(count, build) {
+    let placed = 0;
+    for (let tries = 0; placed < count && tries < count * 60; tries++) {
+      const x = Math.round(between(90, MAP.w - 90));
+      const y = Math.round(between(90, MAP.h - 90));
+      const s = build(x, y);
+      if (x + s.w > MAP.w - 90 || y + s.h > MAP.h - 90) continue;
+      if (inCore(x, y, s.w, s.h, 60) || overlapsWall(x, y, s.w, s.h, 70)) continue;
+      WALLS.push(...s.parts);
+      if (s.loot) ITEM_SPAWNS.push({ ...s.loot, type: pick(['rifle', 'rifle', 'smg', 'shotgun', 'sniper', 'armor']) });
+      placed++;
+    }
+  }
+
+  scatter(10, cabin);
+  scatter(12, grove);
+  scatter(14, crates);
+  scatter(16, rock);
+  scatter(16, iceWall);
+
+  // Objetos sueltos por la zona exterior
+  const LOOSE_LOOT = ['smg', 'smg', 'rifle', 'shotgun', 'shotgun', 'medkit', 'medkit', 'medkit', 'armor'];
+  for (let placed = 0, tries = 0; placed < 22 && tries < 2000; tries++) {
+    const x = Math.round(between(120, MAP.w - 120));
+    const y = Math.round(between(120, MAP.h - 120));
+    if (inCore(x, y, 0, 0, 40) || overlapsWall(x - 30, y - 30, 60, 60, 20)) continue;
+    if (ITEM_SPAWNS.some((it) => Math.hypot(it.x - x, it.y - y) < 300)) continue;
+    ITEM_SPAWNS.push({ x, y, type: pick(LOOSE_LOOT) });
+    placed++;
+  }
+
+  // ---------------------------------------------------------------- Armas
 
   // rate = ms entre disparos, spread = desvío máximo en radianes, speed = multiplicador de velocidad al llevarla
   const WEAPONS = {

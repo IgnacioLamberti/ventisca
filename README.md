@@ -34,13 +34,17 @@ ZONE_GRACE_MS=5000 ZONE_SHRINK_MS=30000 npm start
 
 ---
 
+## Mapa
+
+4200 × 4200 píxeles. En el centro hay una zona diseñada a mano con un fuerte (el mejor botín), muros de hielo y cajas. Alrededor hay una zona exterior con cabañas de madera (cada una tiene un arma adentro), bosques de pinos, rocas, cajas y muros. Esa zona se genera con una semilla fija, así que el servidor y todos los clientes arman exactamente el mismo mapa sin tener que enviarlo por la red.
+
 ## Reglas
 
 | Estado | Qué pasa |
 |---|---|
 | **Calentamiento** | Hay menos de 2 jugadores. Se puede practicar; al morir reaparecés a los 3 s. |
 | **Cuenta regresiva** | 5 s antes de empezar la ronda. |
-| **Ronda** | Todos reaparecen con pistola, se reinician las armas del piso. Sin respawn. A los 20 s la tormenta empieza a cerrarse (150 s), y hace cada vez más daño. |
+| **Ronda** | Todos reaparecen con pistola, se reinician las armas del piso. Sin respawn. A los 30 s la tormenta empieza a cerrarse (tarda 3 min 30 s), y hace cada vez más daño. |
 | **Fin** | Gana el último vivo (+1 victoria). A los 7 s arranca otra ronda. |
 
 Quien entra con una ronda en curso la mira como espectador y juega desde la siguiente.

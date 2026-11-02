@@ -713,8 +713,8 @@
       }
     } else {
       // En el lobby la cámara pasea lentamente por el mapa
-      tx = S.MAP.w / 2 + Math.cos(t / 9000) * 700;
-      ty = S.MAP.h / 2 + Math.sin(t / 11000) * 700;
+      tx = S.MAP.w / 2 + Math.cos(t / 9000) * S.MAP.w * 0.3;
+      ty = S.MAP.h / 2 + Math.sin(t / 11000) * S.MAP.h * 0.3;
     }
     const cf = 1 - Math.exp(-dt * 10);
     camera.x += (tx - camera.x) * cf;
@@ -848,6 +848,28 @@
       ctx.lineTo(w.x + 4, w.y + w.h - 4);
       ctx.lineWidth = 2;
       ctx.stroke();
+    } else if (w.k === 'wood') {
+      ctx.fillStyle = '#8a5a32';
+      ctx.fillRect(w.x, w.y, w.w, w.h);
+      // Tablones a lo largo de la pared
+      ctx.strokeStyle = '#64401f';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      if (w.w >= w.h) {
+        for (let yy = w.y + 7; yy < w.y + w.h; yy += 7) {
+          ctx.moveTo(w.x, yy);
+          ctx.lineTo(w.x + w.w, yy);
+        }
+      } else {
+        for (let xx = w.x + 7; xx < w.x + w.w; xx += 7) {
+          ctx.moveTo(xx, w.y);
+          ctx.lineTo(xx, w.y + w.h);
+        }
+      }
+      ctx.stroke();
+      ctx.strokeStyle = '#4e3218';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(w.x + 1, w.y + 1, w.w - 2, w.h - 2);
     } else if (w.k === 'rock') {
       ctx.fillStyle = '#8693a3';
       roundRect(w.x, w.y, w.w, w.h, 18);
@@ -1106,7 +1128,7 @@
   }
 
   function drawMinimap() {
-    const size = Math.round(clamp(Math.min(W, H) * 0.22, 110, 180));
+    const size = Math.round(clamp(Math.min(W, H) * 0.24, 120, 210));
     const x0 = 14;
     const y0 = 14;
     const sc = size / S.MAP.w;

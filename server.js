@@ -26,8 +26,8 @@ const ROUND_END_MS = 7000;
 const ITEM_RESPAWN_MS = 25000;
 const MAX_DROPPED_ITEMS = 40;
 // Los tiempos de la tormenta se pueden acortar por variable de entorno para probar rápido
-const ZONE_GRACE_MS = Number(process.env.ZONE_GRACE_MS) || 20000;   // tiempo antes de que empiece a cerrarse
-const ZONE_SHRINK_MS = Number(process.env.ZONE_SHRINK_MS) || 150000; // duración del cierre
+const ZONE_GRACE_MS = Number(process.env.ZONE_GRACE_MS) || 30000;   // tiempo antes de que empiece a cerrarse
+const ZONE_SHRINK_MS = Number(process.env.ZONE_SHRINK_MS) || 210000; // duración del cierre
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#ff6b9d', '#34495e', '#c0392b', '#16a085', '#8e44ad'];
 
 // ---------------------------------------------------------------- Estado
@@ -294,7 +294,7 @@ function findSpawn() {
       best = { x, y };
     }
   }
-  return best || { x: 1200, y: 800 };
+  return best || { x: S.MAP.w / 2, y: S.MAP.h / 2 - 400 };
 }
 
 function spawnPlayer(p) {
@@ -553,10 +553,12 @@ function setState(state, endsAt, extra) {
 function startRound(now) {
   round.number++;
   resetItems();
-  const cx = 900 + Math.random() * 600;
-  const cy = 900 + Math.random() * 600;
+  // El centro final de la tormenta cae cerca del medio del mapa; el radio inicial lo cubre entero
+  const cx = S.MAP.w / 2 + (Math.random() - 0.5) * S.MAP.w * 0.3;
+  const cy = S.MAP.h / 2 + (Math.random() - 0.5) * S.MAP.h * 0.3;
+  const startR = Math.hypot(S.MAP.w, S.MAP.h) / 2 + S.MAP.w * 0.15;
   round.zone = {
-    x: cx, y: cy, r: 2200, startR: 2200, endR: 140, dps: 4,
+    x: cx, y: cy, r: startR, startR, endR: 140, dps: 4,
     shrinkStart: now + ZONE_GRACE_MS, shrinkEnd: now + ZONE_GRACE_MS + ZONE_SHRINK_MS,
   };
   for (const p of players.values()) if (p.joined) p.alive = false;
