@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ventisca — Battle Royale</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game" tabindex="0"></canvas>
+
+  <!-- HUD de la partida -->
+  <div id="hud" class="hidden">
+    <div id="topbar">
+      <div id="round-label"></div>
+      <div id="round-sub"></div>
+    </div>
+    <div id="killfeed"></div>
+    <div id="banner"></div>
+    <div id="storm-warning" class="hidden">¡Estás en la tormenta! Volvé a la zona segura</div>
+    <div id="hint" class="hidden"></div>
+    <div id="death" class="hidden"></div>
+
+    <div id="chat">
+      <div id="chat-log"></div>
+      <input id="chat-input" maxlength="140" autocomplete="off" placeholder="Mensaje… (Enter para enviar, Esc para cancelar)">
+    </div>
+
+    <div id="vitals">
+      <div class="bar"><span class="bar-label">Vida</span><div class="bar-track"><div id="hp-fill" class="bar-fill hp"></div></div><span id="hp-text" class="bar-num">100</span></div>
+      <div class="bar"><span class="bar-label">Chaleco</span><div class="bar-track"><div id="armor-fill" class="bar-fill armor"></div></div><span id="armor-text" class="bar-num">0</span></div>
+    </div>
+
+    <div id="weapon-box">
+      <div id="slots">
+        <div id="slot-1" class="slot"><kbd>1</kbd><span>—</span></div>
+        <div id="slot-2" class="slot"><kbd>2</kbd><span>Pistola</span></div>
+      </div>
+      <div id="weapon-name">Pistola</div>
+      <div id="ammo"><span id="ammo-mag">12</span><span id="ammo-res">/ ∞</span></div>
+      <div id="reload" class="hidden"><div id="reload-fill"></div></div>
+    </div>
+  </div>
+
+  <div id="scoreboard" class="hidden">
+    <h2>Tabla de posiciones</h2>
+    <table>
+      <thead><tr><th>#</th><th>Jugador</th><th>Victorias</th><th>Bajas</th><th>Muertes</th><th>Estado</th></tr></thead>
+      <tbody id="score-body"></tbody>
+    </table>
+    <p class="muted">Se actualiza en vivo por SSE</p>
+  </div>
+
+  <!-- Pantalla de inicio -->
+  <div id="lobby">
+    <div class="card">
+      <h1>Ventisca</h1>
+      <p class="tagline">Battle royale todos contra todos en la nieve. Armas en el piso, una tormenta que se cierra, un solo ganador.</p>
+
+      <form id="join-form">
+        <input id="name-input" maxlength="16" placeholder="Tu nombre" autocomplete="off" required>
+        <button type="submit">Jugar</button>
+      </form>
+
+      <div class="lobby-grid">
+        <section>
+          <h3>Controles</h3>
+          <ul class="controls">
+            <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> moverse</li>
+            <li><kbd>Mouse</kbd> apuntar · <kbd>Clic</kbd> disparar</li>
+            <li><kbd>E</kbd> recoger arma · <kbd>G</kbd> tirarla</li>
+            <li><kbd>R</kbd> recargar · <kbd>1</kbd><kbd>2</kbd><kbd>Q</kbd> cambiar arma</li>
+            <li><kbd>Enter</kbd> chat · <kbd>Tab</kbd> tabla</li>
+            <li><kbd>Espacio</kbd> cambiar espectado</li>
+          </ul>
+        </section>
+        <section>
+          <h3>En vivo <span class="pill">SSE</span></h3>
+          <div id="lobby-stats" class="muted">Conectando…</div>
+          <ol id="lobby-top"></ol>
+          <div id="lobby-feed"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="net-status">
+    <span><i id="ws-dot" class="dot"></i>WebSocket</span>
+    <span><i id="sse-dot" class="dot"></i>SSE</span>
+    <span id="ping">— ms</span>
+  </div>
+
+  <script src="shared.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
