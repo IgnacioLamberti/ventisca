@@ -75,7 +75,11 @@ Los bots corren dentro del servidor (`bots.js`) y juegan con las mismas reglas q
 
 ### Controles
 
-`WASD` moverse · `Mouse` apuntar · `Clic` disparar · `E` recoger arma · `G` tirarla · `R` recargar · `1` `2` `Q` / rueda cambiar arma · `Enter` chat · `Tab` tabla · `Espacio` cambiar a quién mirás cuando estás muerto.
+`WASD` moverse · `V` cambiar el modo de movimiento · `Mouse` apuntar · `Clic` disparar · `E` recoger arma · `G` tirarla · `R` recargar · `1` `2` `Q` / rueda cambiar arma · `Enter` chat · `Tab` tabla · `Espacio` cambiar a quién mirás cuando estás muerto.
+
+**Movimiento relativo a la mira** (el modo por defecto): `W` avanza hacia la mira, `S` retrocede alejándose de ella y `A`/`D` se mueven de costado, como en un shooter en primera persona. Con `V` se cambia al **movimiento clásico** (`W` arriba, `S` abajo, `A` izquierda, `D` derecha de la pantalla). La preferencia se guarda en el navegador.
+
+El cliente manda las teclas y si el modo es relativo (`rel`); el servidor calcula la dirección con el ángulo de la mira usando la misma función que el cliente para predecir (`moveDirection` en `shared.js`).
 
 ---
 
@@ -123,7 +127,7 @@ Para que el movimiento propio no se sienta con retraso, el cliente **predice** s
 | Mensaje | Significado |
 |---|---|
 | `{t:'join', name}` | Entrar a la partida |
-| `{t:'i', u,d,l,r, a, s, c}` | Teclas de movimiento, ángulo de la mira, gatillo apretado y contador de clics |
+| `{t:'i', u,d,l,r, rel, a, s, c}` | Teclas de movimiento, si el movimiento es relativo a la mira, ángulo de la mira, gatillo apretado y contador de clics |
 | `{t:'pickup'}` / `{t:'drop'}` | Recoger / tirar arma |
 | `{t:'reload'}` | Recargar |
 | `{t:'slot', s}` | Cambiar a `primary`, `secondary` o `toggle` |

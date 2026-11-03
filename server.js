@@ -207,6 +207,7 @@ function handleMessage(p, msg) {
       p.input.left = !!msg.l;
       p.input.right = !!msg.r;
       p.input.shoot = !!msg.s;
+      p.input.rel = !!msg.rel; // movimiento relativo a la mira
       if (Number.isFinite(msg.a)) p.angle = msg.a;
       // Contador de clics: permite no perder disparos semiautomáticos rápidos entre ticks
       if (Number.isFinite(msg.c) && msg.c > p.clicks) {
@@ -258,7 +259,7 @@ function createPlayer(ws) {
     color: COLORS[(id - 1) % COLORS.length],
     joined: false, alive: false, protectedUntil: 0,
     x: 0, y: 0, angle: 0, hp: 100, armor: 0, moving: false,
-    input: { up: false, down: false, left: false, right: false, shoot: false },
+    input: { up: false, down: false, left: false, right: false, shoot: false, rel: false },
     clicks: 0, pendingClick: false, clickAt: 0,
     primary: null, secondary: null, slot: 'secondary',
     lastShot: 0, reloadUntil: 0, reloadSlot: null, switchUntil: 0,
@@ -699,13 +700,11 @@ function tick() {
       else Bots.updateBot(p, now, botWorld);
     }
 
-    const mx = (p.input.right ? 1 : 0) - (p.input.left ? 1 : 0);
-    const my = (p.input.down ? 1 : 0) - (p.input.up ? 1 : 0);
-    const len = Math.hypot(mx, my);
-    p.moving = len > 0;
+    const dir = S.moveDirection(p.input, p.angle, p.input.rel);
+    p.moving = dir.x !== 0 || dir.y !== 0;
     if (p.moving) {
       const speed = S.SPEED * S.WEAPONS[currentWeapon(p).type].speed * DT;
-      S.moveCircle(p, (mx / len) * speed, (my / len) * speed, S.PLAYER_R);
+      S.moveCircle(p, dir.x * speed, dir.y * speed, S.PLAYER_R);
     }
 
     if (p.reloadUntil && now >= p.reloadUntil) finishReload(p);

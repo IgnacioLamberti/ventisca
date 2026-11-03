@@ -268,6 +268,7 @@ kbd {
 .bar-fill.hp { background: var(--hp); }
 .bar-fill.armor { background: var(--armor); }
 .bar-num { width: 28px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+#move-mode { margin-top: 8px; font-size: 11px; opacity: 0.65; }
 
 #weapon-box {
   position: absolute;

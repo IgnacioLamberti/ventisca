@@ -297,6 +297,26 @@
     }
   }
 
+  // Convierte las teclas en una dirección de movimiento de largo 1 (o {0, 0} si no se mueve).
+  // relative = false: W/S/A/D mueven arriba/abajo/izquierda/derecha de la pantalla.
+  // relative = true:  W va hacia la mira, S se aleja de ella y A/D se mueven de costado respecto de ella.
+  function moveDirection(input, angle, relative) {
+    let x, y;
+    if (relative) {
+      const forward = (input.up ? 1 : 0) - (input.down ? 1 : 0);
+      const side = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      x = forward * cos - side * sin;
+      y = forward * sin + side * cos;
+    } else {
+      x = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+      y = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+    }
+    const len = Math.hypot(x, y);
+    return len > 1e-6 ? { x: x / len, y: y / len } : { x: 0, y: 0 };
+  }
+
   function moveCircle(o, mx, my, r) {
     o.x += mx;
     o.y += my;
@@ -308,7 +328,7 @@
 
   const api = {
     MAP, PLAYER_R, SPEED, PICKUP_R, WALLS, ITEM_SPAWNS, WEAPONS, ITEM_NAMES,
-    clamp, isWeapon, circleHitsWall, resolveCircle, moveCircle,
+    clamp, isWeapon, circleHitsWall, resolveCircle, moveCircle, moveDirection,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

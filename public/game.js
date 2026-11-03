@@ -39,6 +39,7 @@
   let ping = null;
   let spectateId = null;
   let chatOpen = false;
+  let relativeMove = true; // W/S/A/D relativos a la mira (se cambia con V)
   let scoreboardData = [];
   let hitMarkerUntil = 0;
   let hurtUntil = 0;
@@ -110,7 +111,7 @@
   function sendInput() {
     if (!joined) return;
     const m = movementKeys();
-    send({ t: 'i', ...m, a: Math.round(local.a * 1000) / 1000, s: mouse.down && !chatOpen, c: clicks });
+    send({ t: 'i', ...m, rel: relativeMove, a: Math.round(local.a * 1000) / 1000, s: mouse.down && !chatOpen, c: clicks });
   }
   setInterval(sendInput, 1000 / 30);
 
@@ -446,6 +447,15 @@
 
   try { $('name-input').value = localStorage.getItem('ventisca-name') || ''; } catch {}
 
+  function setRelativeMove(on) {
+    relativeMove = on;
+    try { localStorage.setItem('ventisca-relative', on ? '1' : '0'); } catch {}
+    $('move-mode').textContent = on ? 'Movimiento: relativo a la mira · V para cambiar' : 'Movimiento: clásico · V para cambiar';
+  }
+  let savedMode = null;
+  try { savedMode = localStorage.getItem('ventisca-relative'); } catch {}
+  setRelativeMove(savedMode !== '0');
+
   // El servidor rechazó la entrada porque ya hay MAX_PLAYERS personas: volver al lobby
   function onFull(max) {
     joined = false;
@@ -508,6 +518,7 @@
       case 'KeyE': send({ t: 'pickup' }); break;
       case 'KeyR': send({ t: 'reload' }); break;
       case 'KeyG': send({ t: 'drop' }); break;
+      case 'KeyV': setRelativeMove(!relativeMove); break;
       case 'Digit1': send({ t: 'slot', s: 'primary' }); break;
       case 'Digit2': send({ t: 'slot', s: 'secondary' }); break;
       case 'KeyQ': send({ t: 'slot', s: 'toggle' }); break;
@@ -681,17 +692,18 @@
 
     // Predicción local: me muevo ya y el servidor me corrige si hace falta
     if (joined && me && me.al) {
-      const m = movementKeys();
-      const mx = (m.r ? 1 : 0) - (m.l ? 1 : 0);
-      const my = (m.d ? 1 : 0) - (m.u ? 1 : 0);
-      const len = Math.hypot(mx, my);
-      if (len > 0) {
-        const speed = S.SPEED * S.WEAPONS[myWeaponType()].speed * dt;
-        S.moveCircle(local, (mx / len) * speed, (my / len) * speed, S.PLAYER_R);
-      }
+      // Primero la mira (el movimiento relativo depende de hacia dónde apunto).
+      // Con la mira casi encima del personaje el ángulo no es estable: se mantiene el anterior.
       const wx = camera.x + (mouse.x - W / 2) / zoom;
       const wy = camera.y + (mouse.y - H / 2) / zoom;
-      local.a = Math.atan2(wy - local.y, wx - local.x);
+      if (Math.hypot(wx - local.x, wy - local.y) > S.PLAYER_R * 1.5) local.a = Math.atan2(wy - local.y, wx - local.x);
+
+      const m = movementKeys();
+      const dir = S.moveDirection({ up: m.u, down: m.d, left: m.l, right: m.r }, local.a, relativeMove);
+      if (dir.x !== 0 || dir.y !== 0) {
+        const speed = S.SPEED * S.WEAPONS[myWeaponType()].speed * dt;
+        S.moveCircle(local, dir.x * speed, dir.y * speed, S.PLAYER_R);
+      }
       leaveFootprint(local, local.x, local.y);
     }
 
