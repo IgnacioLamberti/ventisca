@@ -1,11 +1,10 @@
 {
   "name": "ventisca",
   "version": "1.0.0",
-  "description": "Battle Royale multijugador 2D (todos contra todos) en un mapa nevado. WebSocket + SSE.",
+  "description": "Deathmatch multijugador 2D (todos contra todos, hasta 10 jugadores con bots) en un mapa nevado. WebSocket + SSE.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "bots": "node test/bots.js"
+    "start": "node server.js"
   },
   "engines": {
     "node": ">=18"

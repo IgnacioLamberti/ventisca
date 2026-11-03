@@ -90,6 +90,7 @@
       const m = JSON.parse(e.data);
       if (m.t === 's') onSnapshot(m);
       else if (m.t === 'welcome') myId = m.id;
+      else if (m.t === 'full') onFull(m.max);
       else if (m.t === 'pong') ping = Date.now() - m.ts;
     };
   }
@@ -208,7 +209,7 @@
     });
     es.addEventListener('stats', (e) => {
       const d = JSON.parse(e.data);
-      $('lobby-stats').textContent = `${d.inGame} jugando · ${d.alive} vivos · ${d.online} conectados por WS · ${d.sseClients} escuchando SSE`;
+      $('lobby-stats').textContent = `${d.humans}/${d.maxPlayers} personas · ${d.bots} bots · ${d.online} conectados por WS · ${d.sseClients} escuchando SSE`;
     });
   }
 
@@ -289,6 +290,7 @@
       sw.className = 'swatch';
       sw.style.background = p.color;
       nameTd.append(sw, document.createTextNode(p.name));
+      if (p.bot) nameTd.append(botTag());
       const cells = [i + 1, null, p.kills, p.deaths, p.wins, p.alive ? 'Vivo' : '💀'];
       cells.forEach((c, idx) => {
         if (idx === 1) return tr.append(nameTd);
@@ -433,6 +435,7 @@
     joinName = name;
     try { localStorage.setItem('ventisca-name', name); } catch {}
     send({ t: 'join', name });
+    $('join-error').classList.add('hidden');
     joined = true;
     document.body.classList.add('playing');
     $('lobby').classList.add('hidden');
@@ -442,6 +445,24 @@
   });
 
   try { $('name-input').value = localStorage.getItem('ventisca-name') || ''; } catch {}
+
+  // El servidor rechazó la entrada porque ya hay MAX_PLAYERS personas: volver al lobby
+  function onFull(max) {
+    joined = false;
+    joinName = null;
+    document.body.classList.remove('playing');
+    $('hud').classList.add('hidden');
+    $('lobby').classList.remove('hidden');
+    $('join-error').textContent = `La partida está llena (${max} de ${max} personas). Probá en un rato.`;
+    $('join-error').classList.remove('hidden');
+  }
+
+  function botTag() {
+    const tag = document.createElement('span');
+    tag.className = 'bot-tag';
+    tag.textContent = 'BOT';
+    return tag;
+  }
 
   function openChat() {
     chatOpen = true;

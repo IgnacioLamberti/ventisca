@@ -17,22 +17,20 @@ npm start
 
 Abrir `http://localhost:3000`. Para jugar con otras personas en la misma red, usar la dirección que imprime la consola (`http://192.168.x.x:3000`).
 
-### Probar solo, con bots
+No hace falta nadie más para probarlo: en cuanto entra una persona, el servidor completa la partida con bots.
 
-En otra terminal, con el servidor corriendo:
-
-```bash
-npm run bots            # 3 bots
-node test/bots.js 6     # 6 bots
-```
-
-### Partidas más cortas (para la demo)
+### Configuración (variables de entorno)
 
 ```bash
-MATCH_MS=60000 KILL_LIMIT=5 npm start
+MATCH_MS=60000 KILL_LIMIT=5 MAX_PLAYERS=6 npm start
 ```
 
-`MATCH_MS` es la duración de cada partida en milisegundos (5 minutos por defecto) y `KILL_LIMIT` las bajas necesarias para ganar (20 por defecto).
+| Variable | Qué controla | Por defecto |
+|---|---|---|
+| `MATCH_MS` | Duración de cada partida, en milisegundos | 300000 (5 min) |
+| `KILL_LIMIT` | Bajas necesarias para ganar | 20 |
+| `MAX_PLAYERS` | Capacidad de la partida (personas + bots) | 10 |
+| `PORT` | Puerto del servidor | 3000 |
 
 ---
 
@@ -44,12 +42,22 @@ MATCH_MS=60000 KILL_LIMIT=5 npm start
 
 | Estado | Qué pasa |
 |---|---|
-| **Calentamiento** | Hay menos de 2 jugadores. Se puede practicar; al morir reaparecés a los 3 s. |
+| **Calentamiento** | No hay nadie jugando. Apenas entra la primera persona, los bots completan la partida y arranca la cuenta regresiva. |
 | **Cuenta regresiva** | 5 s antes de empezar la partida. |
 | **Partida** | Bajas y muertes vuelven a cero, se reinician las armas del piso y todos aparecen con pistola. Al morir reaparecés a los 3 s en un lugar lejos de los enemigos, con 1,5 s de protección (se pierde si disparás). Dura 5 minutos o hasta que alguien llega a 20 bajas. |
 | **Fin** | Gana quien tiene más bajas (si empatan, el que murió menos) y suma una victoria. Todos quedan congelados 8 s y arranca otra partida. |
 
 Se puede entrar en cualquier momento: aparecés directamente en la partida en curso.
+
+### Capacidad y bots
+
+- La partida tiene lugar para **10 jugadores**. Los lugares que no ocupan personas los ocupan **bots**, así siempre hay 10 en el mapa.
+- Cuando entra una persona, se va un bot (si puede, uno que esté muerto, para no cortar una pelea). Cuando una persona se va, entra un bot.
+- Si ya hay 10 personas, la siguiente recibe el aviso de partida llena y vuelve al lobby.
+- Si no queda ninguna persona, los bots se van y el servidor queda en calentamiento.
+- En la tabla los bots tienen la etiqueta **BOT**.
+
+Los bots corren dentro del servidor (`bots.js`) y juegan con las mismas reglas que una persona: en cada tick deciden qué teclas apretar y hacia dónde apuntar. Buscan armas si no tienen, botiquines si están heridos y si no van hacia el enemigo más cercano. Solo disparan a quien ven (las paredes y los árboles tapan), tardan un poco en reaccionar, apuntan peor cuanto más lejos está el objetivo y se mueven de costado mientras pelean.
 
 ### Armas y objetos
 
@@ -127,6 +135,7 @@ Para que el movimiento propio no se sienta con retraso, el cliente **predice** s
 | Mensaje | Significado |
 |---|---|
 | `{t:'welcome', id}` | Id asignado |
+| `{t:'full', max}` | La partida está llena: no se pudo entrar |
 | `{t:'s', now, st, te, rn, kl, p, i, sh, me}` | Snapshot: estado y fin de la partida, límite de bajas, jugadores (con bajas y muertes), objetos, disparos de este tick y mi estado |
 | `{t:'pong', ts}` | Respuesta al ping |
 
@@ -139,7 +148,7 @@ Para que el movimiento propio no se sienta con retraso, el cliente **predice** s
 | `announce` | `{text}` — entradas, salidas, inicio y fin de partida |
 | `round` | `{state, number, endsAt, killLimit, winner?, winnerKills?}` |
 | `scoreboard` | Lista ordenada por bajas, muertes y victorias |
-| `stats` | Conectados por WS, escuchando SSE, vivos, uptime |
+| `stats` | Personas, bots, capacidad, conectados por WS, escuchando SSE, vivos, uptime |
 
 Se puede ver el stream crudo con:
 
@@ -153,10 +162,10 @@ curl -N http://localhost:3000/events
 
 ```
 server.js          Servidor HTTP + WebSocket + SSE y la lógica del juego
+bots.js            Inteligencia de los bots de relleno
 public/
   index.html       Lobby y HUD
   style.css        Estilos
   shared.js        Mapa, armas y colisiones (lo usan servidor y cliente)
   game.js          Cliente: red, predicción, dibujo en canvas, sonido
-test/bots.js       Bots para probar y llenar partidas
 ```

@@ -54,12 +54,13 @@
   <div id="lobby">
     <div class="card">
       <h1>Ventisca</h1>
-      <p class="tagline">Deathmatch todos contra todos en la nieve. Armas en el piso, respawn infinito y gana el que más bajas haga.</p>
+      <p class="tagline">Deathmatch todos contra todos en la nieve, hasta 10 jugadores (los lugares libres los ocupan bots). Armas en el piso, respawn infinito y gana el que más bajas haga.</p>
 
       <form id="join-form">
         <input id="name-input" maxlength="16" placeholder="Tu nombre" autocomplete="off" required>
         <button type="submit">Jugar</button>
       </form>
+      <p id="join-error" class="hidden"></p>
 
       <div class="lobby-grid">
         <section>

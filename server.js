@@ -7,6 +7,8 @@
  *   - WebSocket: /ws  → canal bidireccional de juego (inputs del jugador ↔ estado del mundo, 30 veces por segundo).
  *   - SSE:       /events → canal unidireccional servidor → todos (killfeed, chat, rondas, tabla de posiciones, estadísticas).
  *
+ * La partida tiene lugar para MAX_PLAYERS; los lugares que no ocupan personas los llenan bots (bots.js).
+ *
  * El servidor es autoritativo: él mueve a los jugadores, resuelve los disparos y decide quién muere.
  */
 const http = require('http');
@@ -15,11 +17,13 @@ const os = require('os');
 const path = require('path');
 const { WebSocketServer, WebSocket } = require('ws');
 const S = require('./public/shared.js');
+const Bots = require('./bots.js');
 
 const PORT = Number(process.env.PORT) || 3000;
 const TICK_RATE = 30;
 const DT = 1 / TICK_RATE;
 const MIN_PLAYERS = 2;          // jugadores necesarios para arrancar una ronda
+const MAX_PLAYERS = Number(process.env.MAX_PLAYERS) || 10; // capacidad: personas + bots
 const RESPAWN_MS = 3000;
 const SPAWN_PROTECT_MS = 1500;  // invulnerabilidad al reaparecer (se pierde al disparar)
 const COUNTDOWN_MS = 5000;
@@ -131,14 +135,17 @@ function scoreboard() {
   return [...players.values()]
     .filter((p) => p.joined)
     .sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || b.wins - a.wins)
-    .map((p) => ({ id: p.id, name: p.name, color: p.color, kills: p.kills, deaths: p.deaths, wins: p.wins, alive: p.alive }));
+    .map((p) => ({ id: p.id, name: p.name, color: p.color, kills: p.kills, deaths: p.deaths, wins: p.wins, alive: p.alive, bot: p.isBot }));
 }
 
 function stats() {
   const joined = [...players.values()].filter((p) => p.joined);
   return {
-    online: players.size,
+    online: players.size - botCount(),
     inGame: joined.length,
+    humans: humanCount(),
+    bots: botCount(),
+    maxPlayers: MAX_PLAYERS,
     alive: joined.filter((p) => p.alive).length,
     uptime: Math.round((Date.now() - startedAt) / 1000),
     sseClients: sseClients.size,
@@ -181,11 +188,16 @@ function handleMessage(p, msg) {
   switch (msg.t) {
     case 'join': {
       if (p.joined) return;
+      if (humanCount() >= MAX_PLAYERS) {
+        send(p.ws, { t: 'full', max: MAX_PLAYERS });
+        return;
+      }
       p.name = cleanName(msg.name) || `Jugador${p.id}`;
       p.joined = true;
       // En deathmatch se puede entrar en cualquier momento; si la partida está terminando, aparece en la siguiente
       if (round.state !== 'ended') spawnPlayer(p);
       broadcastSSE('announce', { text: `${p.name} entró a la partida` });
+      balanceBots(); // la persona nueva ocupa el lugar de un bot
       scoreDirty = true;
       break;
     }
@@ -241,7 +253,7 @@ function cleanName(name) {
 function createPlayer(ws) {
   const id = nextPlayerId++;
   return {
-    id, ws,
+    id, ws, isBot: false, brain: null,
     name: '',
     color: COLORS[(id - 1) % COLORS.length],
     joined: false, alive: false, protectedUntil: 0,
@@ -260,9 +272,61 @@ function removePlayer(p) {
   players.delete(p.id);
   if (!p.joined) return;
   if (p.alive && p.primary) dropWeapon(p.primary, p.x, p.y);
+  scoreDirty = true;
+  if (p.isBot) return;
   broadcastSSE('announce', { text: `${p.name} salió de la partida` });
+  balanceBots(); // un bot ocupa el lugar libre
+}
+
+// ---------------------------------------------------------------- Bots de relleno
+
+function humanCount() {
+  let n = 0;
+  for (const p of players.values()) if (p.joined && !p.isBot) n++;
+  return n;
+}
+
+function botCount() {
+  let n = 0;
+  for (const p of players.values()) if (p.isBot) n++;
+  return n;
+}
+
+function addBot() {
+  const p = createPlayer(null);
+  p.isBot = true;
+  p.brain = Bots.createBrain();
+  p.name = Bots.pickName(new Set([...players.values()].map((o) => o.name)));
+  p.joined = true;
+  players.set(p.id, p);
+  if (round.state !== 'ended') spawnPlayer(p);
+}
+
+function removeBot() {
+  const bots = [...players.values()].filter((p) => p.isBot);
+  // Se va preferentemente uno que esté muerto, para no cortar una pelea
+  const bot = bots.find((p) => !p.alive) || bots[bots.length - 1];
+  if (bot) removePlayer(bot);
+}
+
+// Completa con bots hasta MAX_PLAYERS mientras haya al menos una persona jugando
+function balanceBots() {
+  const humans = humanCount();
+  const wanted = humans > 0 ? Math.max(0, MAX_PLAYERS - humans) : 0;
+  let bots = botCount();
+  while (bots < wanted) {
+    addBot();
+    bots++;
+  }
+  while (bots > wanted) {
+    removeBot();
+    bots--;
+  }
   scoreDirty = true;
 }
+
+// Lo que un bot puede "hacer", igual que las acciones que llegan por WebSocket de una persona
+const botWorld = { players, items, rayAABB, tryPickup, startReload, switchSlot, currentWeapon };
 
 // ---------------------------------------------------------------- Jugadores
 
@@ -630,6 +694,11 @@ function tick() {
       continue;
     }
 
+    if (p.isBot) {
+      if (frozen) Bots.idleBot(p);
+      else Bots.updateBot(p, now, botWorld);
+    }
+
     const mx = (p.input.right ? 1 : 0) - (p.input.left ? 1 : 0);
     const my = (p.input.down ? 1 : 0) - (p.input.up ? 1 : 0);
     const len = Math.hypot(mx, my);
@@ -668,7 +737,7 @@ function broadcastSnapshot(now) {
   const base = JSON.stringify({ t: 's', now, st: round.state, te: round.endsAt, rn: round.number, kl: KILL_LIMIT, p: pl, i: it, sh: tickShots }).slice(0, -1);
 
   for (const p of players.values()) {
-    if (p.ws.readyState !== WebSocket.OPEN || p.ws.bufferedAmount > 256 * 1024) continue;
+    if (!p.ws || p.ws.readyState !== WebSocket.OPEN || p.ws.bufferedAmount > 256 * 1024) continue;
     const me = p.joined
       ? {
           id: p.id, al: p.alive ? 1 : 0,
