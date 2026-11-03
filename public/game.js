@@ -1,7 +1,7 @@
 /*
  * Cliente de Ventisca.
  *   - WebSocket: envía los inputs (30/s) y recibe el estado del mundo (30/s).
- *   - SSE (EventSource): recibe killfeed, chat, anuncios, rondas, tabla y estadísticas.
+ *   - SSE (EventSource): recibe killfeed, chat, anuncios, partidas, tabla y estadísticas.
  *   - Canvas 2D: dibuja el mundo; el HUD es HTML.
  */
 (() => {
@@ -55,7 +55,7 @@
   const footprints = [];
 
   const serverNow = () => Date.now() + serverOffset;
-  const weaponName = (type) => (S.WEAPONS[type] ? S.WEAPONS[type].name : type === 'storm' ? 'Tormenta' : type);
+  const weaponName = (type) => (S.WEAPONS[type] ? S.WEAPONS[type].name : type);
 
   function myWeapon() {
     if (!me) return null;
@@ -223,24 +223,19 @@
       w.className = 'wpn';
       w.textContent = `[${weaponName(d.weapon)}]`;
       el.append(w);
-    } else {
-      const w = document.createElement('span');
-      w.className = 'wpn';
-      w.textContent = '❄ la tormenta se llevó a';
-      el.append(w);
     }
     el.append(colored(d.victim, d.vc));
     const feed = $('killfeed');
     feed.append(el);
     while (feed.children.length > 6) feed.firstChild.remove();
     setTimeout(() => el.remove(), 7000);
-    addLobbyFeed(d.killer ? `${d.killer} eliminó a ${d.victim} (${weaponName(d.weapon)})` : `La tormenta eliminó a ${d.victim}`);
+    addLobbyFeed(d.killer ? `${d.killer} eliminó a ${d.victim} (${weaponName(d.weapon)})` : `${d.victim} murió`);
   }
 
   function onRound(d) {
-    if (d.state === 'countdown') showBanner('La ronda empieza en 5 segundos', 2500);
-    else if (d.state === 'playing') showBanner(`Ronda ${d.number} · ¡Último en pie gana!`, 3000);
-    else if (d.state === 'ended') showBanner(d.winner ? `🏆 ${d.winner} ganó la ronda` : 'Nadie sobrevivió', 5000);
+    if (d.state === 'countdown') showBanner('La partida empieza en 5 segundos', 2500);
+    else if (d.state === 'playing') showBanner(`Deathmatch · primero a ${d.killLimit} bajas`, 3000);
+    else if (d.state === 'ended') showBanner(d.winner ? `🏆 ${d.winner} ganó con ${d.winnerKills} bajas` : 'Nadie hizo bajas', 6000);
   }
 
   function colored(text, color) {
@@ -294,7 +289,7 @@
       sw.className = 'swatch';
       sw.style.background = p.color;
       nameTd.append(sw, document.createTextNode(p.name));
-      const cells = [i + 1, null, p.wins, p.kills, p.deaths, p.alive ? 'Vivo' : '💀'];
+      const cells = [i + 1, null, p.kills, p.deaths, p.wins, p.alive ? 'Vivo' : '💀'];
       cells.forEach((c, idx) => {
         if (idx === 1) return tr.append(nameTd);
         const td = document.createElement('td');
@@ -322,7 +317,6 @@
   function updateHud() {
     if (!joined || !snap) return;
     const now = serverNow();
-    const alive = snap.p.filter((p) => p.al).length;
     let label = '';
     let sub = '';
     switch (snap.st) {
@@ -331,19 +325,21 @@
         sub = `Esperando jugadores (${snap.p.length}/2) · reaparecés al morir`;
         break;
       case 'countdown':
-        label = `La ronda empieza en ${Math.max(0, Math.ceil((snap.te - now) / 1000))}`;
+        label = `La partida empieza en ${Math.max(0, Math.ceil((snap.te - now) / 1000))}`;
         sub = 'Agarrá un arma';
         break;
       case 'playing': {
-        label = `Ronda ${snap.rn} · ${alive} vivos`;
-        const z = snap.z;
-        if (z && now < z.ss) sub = `La tormenta se cierra en ${Math.ceil((z.ss - now) / 1000)} s`;
-        else if (z && now < z.se) sub = `La tormenta se está cerrando · ${Math.ceil((z.se - now) / 1000)} s`;
-        else sub = 'Zona final';
+        const left = Math.max(0, Math.ceil((snap.te - now) / 1000));
+        label = `Partida ${snap.rn} · ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+        const top = snap.p.reduce((a, b) => (b.k > a.k || (b.k === a.k && b.d < a.d) ? b : a), snap.p[0]);
+        const mine = snap.p.find((p) => p.id === myId);
+        sub = `Primero a ${snap.kl} bajas`;
+        if (top && top.k > 0) sub += ` · Líder: ${top.n} (${top.k})`;
+        if (mine) sub += ` · Vos: ${mine.k}/${mine.d}`;
         break;
       }
       case 'ended':
-        label = 'Fin de la ronda';
+        label = 'Fin de la partida';
         sub = `Próxima en ${Math.max(0, Math.ceil((snap.te - now) / 1000))} s`;
         break;
     }
@@ -379,12 +375,7 @@
     $('hint').classList.toggle('hidden', !near);
     if (near) $('hint').textContent = `E — recoger ${S.WEAPONS[near.k].name}`;
 
-    // Tormenta
-    const z = snap.z;
-    const inStorm = me.al && snap.st === 'playing' && z && Math.hypot(local.x - z.x, local.y - z.y) > z.r;
-    $('storm-warning').classList.toggle('hidden', !inStorm);
-
-    // Muerte / espectador
+    // Muerte
     const death = $('death');
     if (me.al) {
       death.classList.add('hidden');
@@ -392,13 +383,10 @@
       death.classList.remove('hidden');
       const target = spectateTarget();
       const watching = target ? `Espectando a ${target.n} · Espacio para cambiar` : '';
-      if (me.sp) {
-        death.innerHTML = '<strong>Ronda en curso</strong>Entrás en la próxima ronda.<br>';
-      } else {
-        death.innerHTML = '<strong>Eliminado</strong>';
-        death.append(`Te eliminó ${me.kb || '—'}`, document.createElement('br'));
-        if (me.ra > 0) death.append(`Reaparecés en ${Math.max(0, Math.ceil((me.ra - now) / 1000))} s`, document.createElement('br'));
-      }
+      death.innerHTML = '<strong>Eliminado</strong>';
+      if (me.kb) death.append(`Te eliminó ${me.kb}`, document.createElement('br'));
+      if (snap.st === 'ended') death.append('Esperando la próxima partida', document.createElement('br'));
+      else if (me.ra > 0) death.append(`Reaparecés en ${Math.max(0, Math.ceil((me.ra - now) / 1000))} s`, document.createElement('br'));
       if (watching) death.append(watching);
     }
   }
@@ -774,7 +762,6 @@
     drawWalls(inView, true); // copas de los pinos por encima de los jugadores
     drawTracers(t);
     drawParticles();
-    drawZone(view);
 
     ctx.restore();
 
@@ -995,11 +982,11 @@
     for (const o of others.values()) {
       if (!o.al || o.id === myId) continue;
       if (!inView(o.dx, o.dy, 60)) continue;
-      drawPlayer(o.dx, o.dy, o.da, o.c, o.w, o.n, o.hp, false);
+      drawPlayer(o.dx, o.dy, o.da, o.c, o.w, o.n, o.hp, false, o.pr);
     }
     if (joined && me && me.al) {
       const mine = others.get(myId);
-      drawPlayer(local.x, local.y, local.a, mine ? mine.c : '#3498db', myWeaponType(), joinName, me.hp, true);
+      drawPlayer(local.x, local.y, local.a, mine ? mine.c : '#3498db', myWeaponType(), joinName, me.hp, true, mine && mine.pr);
     }
   }
 
@@ -1011,12 +998,21 @@
     return `rgb(${r},${g},${b})`;
   }
 
-  function drawPlayer(x, y, a, color, wtype, name, hp, isMe) {
+  function drawPlayer(x, y, a, color, wtype, name, hp, isMe, shielded) {
     const R = S.PLAYER_R;
     ctx.fillStyle = 'rgba(40,60,90,0.22)';
     ctx.beginPath();
     ctx.ellipse(x + 4, y + 6, R + 1, R - 3, 0, 0, Math.PI * 2);
     ctx.fill();
+
+    // Protección de reaparición: un aro que titila
+    if (shielded) {
+      ctx.strokeStyle = `rgba(90,169,230,${0.5 + Math.sin(performance.now() / 80) * 0.3})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y, R + 7, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     ctx.save();
     ctx.translate(x, y);
@@ -1101,23 +1097,6 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawZone(view) {
-    const z = snap && snap.z;
-    if (!z) return;
-    ctx.beginPath();
-    ctx.rect(view.x0 - 20, view.y0 - 20, view.x1 - view.x0 + 40, view.y1 - view.y0 + 40);
-    ctx.arc(z.x, z.y, z.r, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(70,110,180,0.32)';
-    ctx.fill('evenodd');
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-    ctx.lineWidth = 4 / zoom;
-    ctx.setLineDash([18, 12]);
-    ctx.beginPath();
-    ctx.arc(z.x, z.y, z.r, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
   function drawSnow() {
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     for (const f of flakes) {
@@ -1140,19 +1119,6 @@
     ctx.fillStyle = '#8fb3cc';
     for (const w of S.WALLS) {
       ctx.fillRect(x0 + w.x * sc, y0 + w.y * sc, Math.max(1.5, w.w * sc), Math.max(1.5, w.h * sc));
-    }
-    const z = snap && snap.z;
-    if (z) {
-      ctx.beginPath();
-      ctx.rect(x0, y0, size, size);
-      ctx.arc(x0 + z.x * sc, y0 + z.y * sc, z.r * sc, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(70,110,180,0.35)';
-      ctx.fill('evenodd');
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(x0 + z.x * sc, y0 + z.y * sc, z.r * sc, 0, Math.PI * 2);
-      ctx.stroke();
     }
     // Zona visible
     ctx.strokeStyle = 'rgba(15,34,54,0.4)';

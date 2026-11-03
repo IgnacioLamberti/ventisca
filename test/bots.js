@@ -47,10 +47,22 @@ function startBot(i) {
       }
     }
 
+    // Sin nadie a la vista, ir hacia el enemigo vivo más cercano para no quedarse dando vueltas solo
     let dir = bot.dir;
-    // Si la tormenta está cerca, caminar hacia el centro de la zona
-    if (snap.z && Math.hypot(me.x - snap.z.x, me.y - snap.z.y) > snap.z.r - 150) {
-      dir = { u: snap.z.y < me.y - 20, d: snap.z.y > me.y + 20, l: snap.z.x < me.x - 20, r: snap.z.x > me.x + 20 };
+    if (!target) {
+      let chase = null;
+      let chaseD = Infinity;
+      for (const p of snap.p) {
+        if (p.id === me.id || !p.al) continue;
+        const d = Math.hypot(p.x - me.x, p.y - me.y);
+        if (d < chaseD) {
+          chaseD = d;
+          chase = p;
+        }
+      }
+      if (chase && Math.random() < 0.7) {
+        dir = { u: chase.y < me.y - 40, d: chase.y > me.y + 40, l: chase.x < me.x - 40, r: chase.x > me.x + 40 };
+      }
     }
 
     const a = target ? Math.atan2(target.y - me.y, target.x - me.x) + (Math.random() - 0.5) * 0.15 : 0;

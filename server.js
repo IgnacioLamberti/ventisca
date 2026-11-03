@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Ventisca — Battle Royale multijugador (todos contra todos) en un mapa nevado.
+ * Ventisca — Deathmatch multijugador (todos contra todos, con respawn) en un mapa nevado.
  *
  * Un único proceso Node sirve tres cosas sobre el mismo puerto:
  *   - HTTP:      archivos estáticos de /public y GET /api/estado.
@@ -20,14 +20,15 @@ const PORT = Number(process.env.PORT) || 3000;
 const TICK_RATE = 30;
 const DT = 1 / TICK_RATE;
 const MIN_PLAYERS = 2;          // jugadores necesarios para arrancar una ronda
-const RESPAWN_MS = 3000;        // respawn durante el calentamiento
+const RESPAWN_MS = 3000;
+const SPAWN_PROTECT_MS = 1500;  // invulnerabilidad al reaparecer (se pierde al disparar)
 const COUNTDOWN_MS = 5000;
-const ROUND_END_MS = 7000;
+const ROUND_END_MS = 8000;
 const ITEM_RESPAWN_MS = 25000;
 const MAX_DROPPED_ITEMS = 40;
-// Los tiempos de la tormenta se pueden acortar por variable de entorno para probar rápido
-const ZONE_GRACE_MS = Number(process.env.ZONE_GRACE_MS) || 30000;   // tiempo antes de que empiece a cerrarse
-const ZONE_SHRINK_MS = Number(process.env.ZONE_SHRINK_MS) || 210000; // duración del cierre
+// Duración y límite de bajas de cada partida; se pueden cambiar por variable de entorno
+const MATCH_MS = Number(process.env.MATCH_MS) || 5 * 60 * 1000;
+const KILL_LIMIT = Number(process.env.KILL_LIMIT) || 20;
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#ff6b9d', '#34495e', '#c0392b', '#16a085', '#8e44ad'];
 
 // ---------------------------------------------------------------- Estado
@@ -40,7 +41,7 @@ let nextItemId = 1;
 let tickShots = [];
 let scoreDirty = true;
 const startedAt = Date.now();
-const round = { state: 'warmup', endsAt: 0, number: 0, zone: null };
+const round = { state: 'warmup', endsAt: 0, number: 0 };
 
 const clamp = S.clamp;
 const r1 = (n) => Math.round(n * 10) / 10;
@@ -129,7 +130,7 @@ setInterval(() => broadcastSSE('stats', stats()), 2000);
 function scoreboard() {
   return [...players.values()]
     .filter((p) => p.joined)
-    .sort((a, b) => b.wins - a.wins || b.kills - a.kills || a.deaths - b.deaths)
+    .sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || b.wins - a.wins)
     .map((p) => ({ id: p.id, name: p.name, color: p.color, kills: p.kills, deaths: p.deaths, wins: p.wins, alive: p.alive }));
 }
 
@@ -145,7 +146,7 @@ function stats() {
 }
 
 function roundInfo(extra) {
-  return { state: round.state, endsAt: round.endsAt, number: round.number, minPlayers: MIN_PLAYERS, ...extra };
+  return { state: round.state, endsAt: round.endsAt, number: round.number, minPlayers: MIN_PLAYERS, killLimit: KILL_LIMIT, ...extra };
 }
 
 // ---------------------------------------------------------------- WebSocket (juego)
@@ -182,12 +183,8 @@ function handleMessage(p, msg) {
       if (p.joined) return;
       p.name = cleanName(msg.name) || `Jugador${p.id}`;
       p.joined = true;
-      if (round.state === 'playing' || round.state === 'ended') {
-        p.alive = false;
-        p.spectator = true; // entra a la próxima ronda
-      } else {
-        spawnPlayer(p);
-      }
+      // En deathmatch se puede entrar en cualquier momento; si la partida está terminando, aparece en la siguiente
+      if (round.state !== 'ended') spawnPlayer(p);
       broadcastSSE('announce', { text: `${p.name} entró a la partida` });
       scoreDirty = true;
       break;
@@ -247,7 +244,7 @@ function createPlayer(ws) {
     id, ws,
     name: '',
     color: COLORS[(id - 1) % COLORS.length],
-    joined: false, alive: false, spectator: false,
+    joined: false, alive: false, protectedUntil: 0,
     x: 0, y: 0, angle: 0, hp: 100, armor: 0, moving: false,
     input: { up: false, down: false, left: false, right: false, shoot: false },
     clicks: 0, pendingClick: false, clickAt: 0,
@@ -278,23 +275,27 @@ function currentWeapon(p) {
   return p.slot === 'primary' && p.primary ? p.primary : p.secondary;
 }
 
+// Busca un lugar libre lejos de los enemigos, pero no en la otra punta del mapa:
+// cualquier punto a más de SAFE_SPAWN_DIST sirve; si no hay ninguno, el más alejado.
+const SAFE_SPAWN_DIST = 800;
+
 function findSpawn() {
   const others = [...players.values()].filter((o) => o.alive);
-  let best = null;
-  let bestScore = -1;
-  for (let i = 0; i < 40; i++) {
+  let farthest = null;
+  let farthestD = -1;
+  for (let i = 0; i < 60; i++) {
     const x = 100 + Math.random() * (S.MAP.w - 200);
     const y = 100 + Math.random() * (S.MAP.h - 200);
     if (S.circleHitsWall(x, y, S.PLAYER_R + 8)) continue;
     let minD = Infinity;
     for (const o of others) minD = Math.min(minD, Math.hypot(o.x - x, o.y - y));
-    const score = others.length ? minD : Math.random();
-    if (score > bestScore) {
-      bestScore = score;
-      best = { x, y };
+    if (minD >= SAFE_SPAWN_DIST) return { x, y };
+    if (minD > farthestD) {
+      farthestD = minD;
+      farthest = { x, y };
     }
   }
-  return best || { x: S.MAP.w / 2, y: S.MAP.h / 2 - 400 };
+  return farthest || { x: S.MAP.w / 2, y: S.MAP.h / 2 - 400 };
 }
 
 function spawnPlayer(p) {
@@ -304,7 +305,7 @@ function spawnPlayer(p) {
   p.hp = 100;
   p.armor = 0;
   p.alive = true;
-  p.spectator = false;
+  p.protectedUntil = Date.now() + SPAWN_PROTECT_MS;
   p.primary = null;
   p.secondary = newWeapon('pistol');
   p.slot = 'secondary';
@@ -392,6 +393,7 @@ function tryShoot(p, now) {
     return;
   }
   w.mag--;
+  p.protectedUntil = 0; // disparar cancela la protección de reaparición
   p.lastShot = now;
   const spread = def.spread * (p.moving ? 1.6 : 1);
   for (let i = 0; i < def.pellets; i++) {
@@ -426,7 +428,7 @@ function fireRay(p, angle, def, type) {
 }
 
 function damage(target, attacker, dmg, type) {
-  if (!target.alive) return;
+  if (!target.alive || Date.now() < target.protectedUntil) return;
   if (target.armor > 0) {
     const absorbed = Math.min(target.armor, dmg * 0.5);
     target.armor -= absorbed;
@@ -442,7 +444,7 @@ function killPlayer(victim, killer, type) {
   victim.alive = false;
   victim.hp = 0;
   victim.deaths++;
-  victim.killedBy = killer ? killer.name : 'la tormenta';
+  victim.killedBy = killer ? killer.name : null;
   victim.reloadUntil = 0;
   if (killer && killer !== victim) {
     killer.kills++;
@@ -452,7 +454,7 @@ function killPlayer(victim, killer, type) {
     dropWeapon(victim.primary, victim.x, victim.y);
     victim.primary = null;
   }
-  victim.respawnAt = round.state === 'playing' ? 0 : Date.now() + RESPAWN_MS;
+  victim.respawnAt = Date.now() + RESPAWN_MS;
   scoreDirty = true;
   broadcastSSE('kill', {
     killer: killer ? killer.name : null,
@@ -542,7 +544,7 @@ function tryPickup(p) {
   takeItem(best, now);
 }
 
-// ---------------------------------------------------------------- Rondas y tormenta
+// ---------------------------------------------------------------- Partidas (deathmatch)
 
 function setState(state, endsAt, extra) {
   round.state = state;
@@ -553,34 +555,41 @@ function setState(state, endsAt, extra) {
 function startRound(now) {
   round.number++;
   resetItems();
-  // El centro final de la tormenta cae cerca del medio del mapa; el radio inicial lo cubre entero
-  const cx = S.MAP.w / 2 + (Math.random() - 0.5) * S.MAP.w * 0.3;
-  const cy = S.MAP.h / 2 + (Math.random() - 0.5) * S.MAP.h * 0.3;
-  const startR = Math.hypot(S.MAP.w, S.MAP.h) / 2 + S.MAP.w * 0.15;
-  round.zone = {
-    x: cx, y: cy, r: startR, startR, endR: 140, dps: 4,
-    shrinkStart: now + ZONE_GRACE_MS, shrinkEnd: now + ZONE_GRACE_MS + ZONE_SHRINK_MS,
-  };
-  for (const p of players.values()) if (p.joined) p.alive = false;
+  for (const p of players.values()) {
+    if (!p.joined) continue;
+    p.kills = 0;
+    p.deaths = 0;
+    p.alive = false;
+  }
   for (const p of players.values()) if (p.joined) spawnPlayer(p);
-  setState('playing', 0);
-  broadcastSSE('announce', { text: `¡Empieza la ronda ${round.number}! El último en pie gana.` });
+  setState('playing', now + MATCH_MS);
+  broadcastSSE('announce', { text: `¡Empieza la partida ${round.number}! Gana el primero en llegar a ${KILL_LIMIT} bajas o el que tenga más al terminar el tiempo.` });
 }
 
-function endRound(winner, now) {
+// Gana quien tiene más bajas; si empatan, quien murió menos
+function leader() {
+  let best = null;
+  for (const p of players.values()) {
+    if (!p.joined) continue;
+    if (!best || p.kills > best.kills || (p.kills === best.kills && p.deaths < best.deaths)) best = p;
+  }
+  return best && best.kills > 0 ? best : null;
+}
+
+function endRound(now) {
+  const winner = leader();
   if (winner) {
     winner.wins++;
     scoreDirty = true;
   }
-  setState('ended', now + ROUND_END_MS, { winner: winner ? winner.name : null, winnerColor: winner ? winner.color : null });
-  broadcastSSE('announce', { text: winner ? `${winner.name} ganó la ronda ${round.number}` : `Ronda ${round.number}: nadie sobrevivió` });
-}
-
-function updateZone(now) {
-  const z = round.zone;
-  const k = clamp((now - z.shrinkStart) / (z.shrinkEnd - z.shrinkStart), 0, 1);
-  z.r = z.startR + (z.endR - z.startR) * k;
-  z.dps = 4 + 16 * k;
+  setState('ended', now + ROUND_END_MS, {
+    winner: winner ? winner.name : null,
+    winnerColor: winner ? winner.color : null,
+    winnerKills: winner ? winner.kills : 0,
+  });
+  broadcastSSE('announce', {
+    text: winner ? `${winner.name} ganó la partida ${round.number} con ${winner.kills} bajas` : `Partida ${round.number}: nadie hizo bajas`,
+  });
 }
 
 function updateRound(now) {
@@ -593,15 +602,12 @@ function updateRound(now) {
       if (active.length < MIN_PLAYERS) setState('warmup', 0);
       else if (now >= round.endsAt) startRound(now);
       break;
-    case 'playing': {
-      updateZone(now);
-      const alive = active.filter((p) => p.alive);
-      if (alive.length <= 1) endRound(alive[0] || null, now);
+    case 'playing':
+      if (active.length < MIN_PLAYERS) setState('warmup', 0);
+      else if (now >= round.endsAt || active.some((p) => p.kills >= KILL_LIMIT)) endRound(now);
       break;
-    }
     case 'ended':
       if (now < round.endsAt) break;
-      round.zone = null;
       if (active.length >= MIN_PLAYERS) setState('countdown', now + COUNTDOWN_MS);
       else setState('warmup', 0);
       for (const p of active) if (!p.alive) spawnPlayer(p);
@@ -614,12 +620,13 @@ function updateRound(now) {
 function tick() {
   const now = Date.now();
   updateRound(now);
-  const canRespawn = round.state === 'warmup' || round.state === 'countdown';
+  // Al terminar la partida todos quedan congelados (sin disparar ni reaparecer) hasta la siguiente
+  const frozen = round.state === 'ended';
 
   for (const p of players.values()) {
     if (!p.joined) continue;
     if (!p.alive) {
-      if (canRespawn && p.respawnAt && now >= p.respawnAt) spawnPlayer(p);
+      if (!frozen && p.respawnAt && now >= p.respawnAt) spawnPlayer(p);
       continue;
     }
 
@@ -634,15 +641,7 @@ function tick() {
 
     if (p.reloadUntil && now >= p.reloadUntil) finishReload(p);
     autoPickups(p, now);
-    tryShoot(p, now);
-
-    if (round.state === 'playing' && round.zone && p.alive) {
-      const z = round.zone;
-      if (Math.hypot(p.x - z.x, p.y - z.y) > z.r) {
-        p.hp -= z.dps * DT;
-        if (p.hp <= 0) killPlayer(p, null, 'storm');
-      }
-    }
+    if (!frozen) tryShoot(p, now);
   }
 
   respawnItems(now);
@@ -659,21 +658,20 @@ function broadcastSnapshot(now) {
       x: r1(p.x), y: r1(p.y), a: Math.round(p.angle * 100) / 100,
       hp: Math.ceil(p.hp), ar: Math.ceil(p.armor), al: p.alive ? 1 : 0,
       w: p.alive ? currentWeapon(p).type : null,
+      k: p.kills, d: p.deaths, pr: now < p.protectedUntil ? 1 : 0,
     });
   }
   const it = [];
   for (const i of items.values()) it.push({ id: i.id, k: i.type, x: i.x, y: i.y });
-  const z = round.zone;
-  const zone = z ? { x: r1(z.x), y: r1(z.y), r: r1(z.r), ss: z.shrinkStart, se: z.shrinkEnd } : null;
 
   // La parte común se serializa una sola vez; a cada cliente se le agrega su propio estado ("me")
-  const base = JSON.stringify({ t: 's', now, st: round.state, te: round.endsAt, rn: round.number, z: zone, p: pl, i: it, sh: tickShots }).slice(0, -1);
+  const base = JSON.stringify({ t: 's', now, st: round.state, te: round.endsAt, rn: round.number, kl: KILL_LIMIT, p: pl, i: it, sh: tickShots }).slice(0, -1);
 
   for (const p of players.values()) {
     if (p.ws.readyState !== WebSocket.OPEN || p.ws.bufferedAmount > 256 * 1024) continue;
     const me = p.joined
       ? {
-          id: p.id, al: p.alive ? 1 : 0, sp: p.spectator ? 1 : 0,
+          id: p.id, al: p.alive ? 1 : 0,
           x: r1(p.x), y: r1(p.y), hp: Math.ceil(p.hp), ar: Math.ceil(p.armor),
           slot: p.slot, pw: p.primary, sw: p.secondary, rl: p.reloadUntil,
           ev: p.events, kb: p.killedBy, ra: p.respawnAt,

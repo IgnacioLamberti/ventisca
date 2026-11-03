@@ -1,6 +1,6 @@
-# ❄ Ventisca — Battle Royale multijugador
+# ❄ Ventisca — Deathmatch multijugador
 
-Juego 2D vista desde arriba, **todos contra todos**, en un mapa nevado. Todos arrancan con una pistola y las **armas están en el piso**. Una **tormenta** va cerrando el mapa y el **último en pie gana** la ronda.
+Juego 2D vista desde arriba, **todos contra todos**, en un mapa nevado. Todos arrancan con una pistola y las **armas están en el piso**. Al morir **reaparecés** a los pocos segundos, y **gana quien hace más bajas** en la partida.
 
 Comunicación en tiempo real con **WebSocket** (juego) y **Server-Sent Events** (eventos globales).
 
@@ -26,11 +26,13 @@ npm run bots            # 3 bots
 node test/bots.js 6     # 6 bots
 ```
 
-### Tormenta rápida (para la demo)
+### Partidas más cortas (para la demo)
 
 ```bash
-ZONE_GRACE_MS=5000 ZONE_SHRINK_MS=30000 npm start
+MATCH_MS=60000 KILL_LIMIT=5 npm start
 ```
+
+`MATCH_MS` es la duración de cada partida en milisegundos (5 minutos por defecto) y `KILL_LIMIT` las bajas necesarias para ganar (20 por defecto).
 
 ---
 
@@ -43,11 +45,11 @@ ZONE_GRACE_MS=5000 ZONE_SHRINK_MS=30000 npm start
 | Estado | Qué pasa |
 |---|---|
 | **Calentamiento** | Hay menos de 2 jugadores. Se puede practicar; al morir reaparecés a los 3 s. |
-| **Cuenta regresiva** | 5 s antes de empezar la ronda. |
-| **Ronda** | Todos reaparecen con pistola, se reinician las armas del piso. Sin respawn. A los 30 s la tormenta empieza a cerrarse (tarda 3 min 30 s), y hace cada vez más daño. |
-| **Fin** | Gana el último vivo (+1 victoria). A los 7 s arranca otra ronda. |
+| **Cuenta regresiva** | 5 s antes de empezar la partida. |
+| **Partida** | Bajas y muertes vuelven a cero, se reinician las armas del piso y todos aparecen con pistola. Al morir reaparecés a los 3 s en un lugar lejos de los enemigos, con 1,5 s de protección (se pierde si disparás). Dura 5 minutos o hasta que alguien llega a 20 bajas. |
+| **Fin** | Gana quien tiene más bajas (si empatan, el que murió menos) y suma una victoria. Todos quedan congelados 8 s y arranca otra partida. |
 
-Quien entra con una ronda en curso la mira como espectador y juega desde la siguiente.
+Se puede entrar en cualquier momento: aparecés directamente en la partida en curso.
 
 ### Armas y objetos
 
@@ -79,7 +81,7 @@ Navegador                                   Servidor Node (server.js)
  estado  ◀───────────────────────────────   snapshot del mundo + mi estado
 
                  SSE  /events  (servidor → todos)
- killfeed, chat, rondas, tabla, stats ◀──   broadcastSSE(evento, datos)
+ killfeed, chat, partidas, tabla, stats ◀──   broadcastSSE(evento, datos)
 
                  HTTP
  index.html, game.js, shared.js ◀────────   archivos estáticos + GET /api/estado
@@ -90,7 +92,7 @@ Navegador                                   Servidor Node (server.js)
 | | WebSocket | SSE |
 |---|---|---|
 | Dirección | Cliente ↔ servidor | Servidor → cliente |
-| Uso en el juego | Teclas, mouse y disparos (cliente → servidor) y posición de todos los jugadores, balas y tormenta (servidor → cliente), 30 veces por segundo | Eventos esporádicos que les interesan a todos: bajas (killfeed), chat, anuncios, cambios de ronda, tabla de posiciones y estadísticas |
+| Uso en el juego | Teclas, mouse y disparos (cliente → servidor) y posición y marcador de todos los jugadores, objetos y balas (servidor → cliente), 30 veces por segundo | Eventos esporádicos que les interesan a todos: bajas (killfeed), chat, anuncios, inicio y fin de partida, tabla de posiciones y estadísticas |
 | Por qué | Necesita baja latencia en ambos sentidos | Es simple, reconecta solo (`EventSource`), funciona sobre HTTP común y no necesita estar dentro de la partida: el **lobby** ya muestra la actividad en vivo antes de entrar a jugar |
 
 El chat muestra los dos juntos: el mensaje **sale por WebSocket** (`{t:'chat'}`) y el servidor lo **reparte por SSE** (`event: chat`) a todos, incluso a quienes están en el lobby.
@@ -101,7 +103,7 @@ El cliente nunca dice "estoy en (x, y)" ni "le pegué a Juan": solo manda qué t
 
 1. Mueve a cada jugador con las mismas reglas de colisión (`public/shared.js`).
 2. Resuelve cada disparo con un rayo contra paredes (intersección rayo–rectángulo) y jugadores (rayo–círculo).
-3. Aplica daño, chaleco, muertes, la tormenta y el estado de la ronda.
+3. Aplica daño, chaleco, muertes, reapariciones y el estado de la partida (tiempo y límite de bajas).
 4. Envía a cada cliente el snapshot. La parte común se serializa una sola vez y a cada uno se le agrega su estado privado (`me`: munición, recarga, eventos de daño).
 
 Para que el movimiento propio no se sienta con retraso, el cliente **predice** su posición con el mismo código del servidor y la **corrige** suavemente cuando el servidor dice otra cosa. A los demás jugadores los **interpola** entre snapshots.
@@ -125,18 +127,18 @@ Para que el movimiento propio no se sienta con retraso, el cliente **predice** s
 | Mensaje | Significado |
 |---|---|
 | `{t:'welcome', id}` | Id asignado |
-| `{t:'s', now, st, te, rn, z, p, i, sh, me}` | Snapshot: estado de ronda, tormenta, jugadores, objetos, disparos de este tick y mi estado |
+| `{t:'s', now, st, te, rn, kl, p, i, sh, me}` | Snapshot: estado y fin de la partida, límite de bajas, jugadores (con bajas y muertes), objetos, disparos de este tick y mi estado |
 | `{t:'pong', ts}` | Respuesta al ping |
 
 **SSE — eventos (`GET /events`)**
 
 | Evento | Datos |
 |---|---|
-| `kill` | `{killer, victim, weapon}` (killer `null` si fue la tormenta) |
+| `kill` | `{killer, victim, weapon}` |
 | `chat` | `{name, color, text}` |
-| `announce` | `{text}` — entradas, salidas, inicio y fin de ronda |
-| `round` | `{state, number, endsAt, winner?}` |
-| `scoreboard` | Lista ordenada por victorias y bajas |
+| `announce` | `{text}` — entradas, salidas, inicio y fin de partida |
+| `round` | `{state, number, endsAt, killLimit, winner?, winnerKills?}` |
+| `scoreboard` | Lista ordenada por bajas, muertes y victorias |
 | `stats` | Conectados por WS, escuchando SSE, vivos, uptime |
 
 Se puede ver el stream crudo con:

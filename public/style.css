@@ -173,21 +173,6 @@ kbd {
 }
 #banner.show { opacity: 1; }
 
-#storm-warning {
-  position: absolute;
-  top: 78px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 6px 14px;
-  border-radius: 8px;
-  background: rgba(42, 111, 176, 0.92);
-  color: #fff;
-  font-weight: 700;
-  font-size: 14px;
-  animation: pulse 1s infinite alternate;
-}
-@keyframes pulse { to { opacity: 0.65; } }
-
 #hint {
   position: absolute;
   bottom: 30%;
